@@ -1,1 +1,12 @@
+---
+---
+---
 
+PRAKTIKUM 1 MPDW
+
+```{r}
+x=3+2
+x
+```
+
+![](images/P1160403.JPG){width="408"}
