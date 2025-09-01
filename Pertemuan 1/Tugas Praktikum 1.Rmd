@@ -1,0 +1,407 @@
+---
+title: "Praktikum 1 MPDW"
+author: "Atika Fawwaz G1401231038"
+date: "2025-08-31"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# load library
+library("forecast")
+library("graphics")
+library("TTR")
+library("TSA")
+```
+
+### Impor Data (baris 1-100)
+
+```{r}
+library(rio)
+data <- import("https://raw.githubusercontent.com/atikafawwaz/mpdw/main/Pertemuan%201/coffeprices.xlsx", format = "xlsx")
+```
+
+### Eksplorasi Data
+
+```{r}
+View(data)
+str(data)
+dim(data)
+```
+
+```{r}
+# konversi kolom Price menjadi objek time series
+data.ts <- ts(data$Price, start = c(1960, 1), frequency = 12)
+```
+
+```{r}
+summary(data.ts)
+```
+
+```{r}
+# plot data deret waktu untuk melihat pola (trend/musiman)
+ts.plot(data.ts, xlab="Time Period", ylab="Price", 
+        main = "Time Series Plot of Coffe Arabica")
+points(data.ts)
+```
+
+Berdasarkan plot deret waktu, terlihat adanya pola trend yang cukup jelas dan adanya trend jangka panjang: penurunan (1960–1963), lonjakan (1964), lalu stabil pada level tinggi sebelum kembali turun (1967–1968).
+
+### Pembagian Data
+
+Pembagian data latih dan data uji dilakukan dengan perbandingan 80% data latih dan 20% data uji.
+
+```{r}
+# ubah kolom Date ke format Date
+data$Date <- as.Date(data$Date, format = "%Y-%m-%d")
+
+# split data
+training_ma <- data[1:80,]
+testing_ma  <- data[81:100,]
+
+# ubah langsung jadi time series dengan periode asli
+train_ma.ts <- ts(training_ma$Price,
+                  start = c(as.numeric(format(training_ma$Date[1], "%Y")),
+                            as.numeric(format(training_ma$Date[1], "%m"))),
+                  frequency = 12)
+
+test_ma.ts <- ts(testing_ma$Price,
+                 start = c(as.numeric(format(testing_ma$Date[1], "%Y")),
+                           as.numeric(format(testing_ma$Date[1], "%m"))),
+                 frequency = 12)
+```
+
+### Eksplorasi Data
+
+```{r}
+#eksplorasi keseluruhan data
+plot(data.ts, col="red",main="Plot semua data")
+points(data.ts)
+
+#eksplorasi data latih
+plot(train_ma.ts, col="blue",main="Plot data latih")
+points(train_ma.ts)
+
+#eksplorasi data uji
+plot(test_ma.ts, col="blue",main="Plot data uji")
+points(test_ma.ts)
+```
+
+```{r}
+#Eksplorasi dengan GGPLOT: bandingkan garis data latih vs data uji
+library(ggplot2)
+ggplot() + 
+  geom_line(data = training_ma, aes(x = Date, y = Price, col = "Data Latih")) +
+  geom_line(data = testing_ma, aes(x = Date, y = Price, col = "Data Uji")) +
+  labs(x = "Time Period", y = "Price", color = "Legend") +
+  scale_colour_manual(name="Keterangan:", breaks = c("Data Latih", "Data Uji"),
+                      values = c("blue", "red")) + 
+  theme_bw() + theme(legend.position = "bottom",
+                     plot.caption = element_text(hjust=0.5, size=12))
+```
+
+Dari pola yang ada (lonjakan besar 1964, lalu turun lagi), penggunaan Double Moving Average (DMA) lebih disarankan karena bisa menangkap perubahan tren lebih cepat dibanding Single Moving Average (SMA).
+
+## Double Moving Average
+
+```{r}
+data.sma<-SMA(train_ma.ts, n=4)
+data.sma
+dma <- SMA(data.sma, n = 4)
+At <- 2*data.sma - dma
+Bt <- 2/(4-1)*(data.sma - dma)
+data.dma<- At+Bt
+data.ramal2<- c(NA, data.dma)
+
+t = 1:24
+f = c()
+
+for (i in t) {
+  f[i] = At[length(At)] + Bt[length(Bt)]*(i)
+}
+
+data.gab2 <- cbind(aktual = c(train_ma.ts,rep(NA,20)), pemulusan1 = c(data.sma,rep(NA,20)),pemulusan2 = c(data.dma, rep(NA,20)),At = c(At, rep(NA,20)), Bt = c(Bt,rep(NA,20)),ramalan = c(data.ramal2, f[-1]))
+data.gab2
+
+```
+
+Hasil pemulusan menggunakan metode DMA divisualisasikan sebagai berikut
+
+```{r}
+# buat ts untuk kolom 3 (pemulusan) dan kolom 6 (ramalan)
+pemulusan.ts <- ts(data.gab2[,3], start=c(1960,1), frequency=12)
+ramalan.ts   <- ts(data.gab2[,6], start=c(1960,1), frequency=12)
+
+# grafik dasar (data aktual)
+ts.plot(data.ts, 
+        xlab="Date", 
+        ylab="Price", 
+        main="DMA N=4 Data of Coffe Arabica", 
+        col="black", lty=2)
+
+# tambahkan garis pemulusan
+lines(pemulusan.ts, col="green", lwd=2)
+
+# tambahkan garis ramalan
+lines(ramalan.ts, col="red", lwd=2)
+
+# legenda
+legend("topleft", 
+       legend=c("data aktual", "data pemulusan", "data peramalan"), 
+       col=c("black", "green", "red"), 
+       lty=c(2,1,1), 
+       cex=0.8)
+```
+
+Berdasarkan grafik DMA N=4, model pemulusan cukup mampu mengikuti pola pergerakan harga kopi arabika 1960–1967. Hasil peramalan menunjukkan tren menurun setelah 1967, yang mencerminkan keterbatasan metode DMA dalam menangkap pola musiman. Selanjutnya perhitungan akurasi dilakukan baik pada data latih maupun data uji. Perhitungan akurasi dilakukan dengan ukuran akurasi SSE, MSE dan MAPE.
+
+```{r}
+#Menghitung nilai keakuratan data latih
+error_train.dma = train_ma.ts-data.ramal2[1:length(train_ma.ts)]
+SSE_train.dma = sum(error_train.dma[8:length(train_ma.ts)]^2)
+MSE_train.dma = mean(error_train.dma[8:length(train_ma.ts)]^2)
+MAPE_train.dma = mean(abs((error_train.dma[8:length(train_ma.ts)]/train_ma.ts[8:length(train_ma.ts)])*100))
+
+akurasi_train.dma <- matrix(c(SSE_train.dma, MSE_train.dma, MAPE_train.dma))
+row.names(akurasi_train.dma)<- c("SSE", "MSE", "MAPE")
+colnames(akurasi_train.dma) <- c("Akurasi m = 4")
+akurasi_train.dma
+```
+
+Perhitungan akurasi pada data latih menggunakan nilai MAPE sebesar 2.18% (kurang dari 10%) sehingga dikategorikan sangat baik. Selanjutnya, perhitungan nilai akurasi dilakukan pada data uji.
+
+```{r}
+#Menghitung nilai keakuratan data uji
+error_test.dma = test_ma.ts-data.gab2[81:100,6]
+SSE_test.dma = sum(error_test.dma^2)
+MSE_test.dma = mean(error_test.dma^2)
+MAPE_test.dma = mean(abs((error_test.dma/test_ma.ts*100)))
+
+akurasi_test.dma <- matrix(c(SSE_test.dma, MSE_test.dma, MAPE_test.dma))
+row.names(akurasi_test.dma)<- c("SSE", "MSE", "MAPE")
+colnames(akurasi_test.dma) <- c("Akurasi m = 4")
+akurasi_test.dma
+```
+
+Perhitungan akurasi menggunakan data latih menghasilkan nilai MAPE sebesar 7.73% (kurang dari 10%) sehingga dikategorikan baik.
+
+## Single Exponential Smoothing & Double Exponential Smoothing
+
+### Pembagian Data
+
+```{r}
+#membagi training dan testing
+# ubah kolom Date ke format Date
+data$Date <- as.Date(data$Date)
+
+# split data
+training <- data[1:80,]
+testing  <- data[81:100,]
+
+# langsung buat time series dengan format base R
+train.ts <- ts(training$Price,
+               start = c(as.numeric(format(training$Date[1], "%Y")),
+                         as.numeric(format(training$Date[1], "%m"))),
+               frequency = 12)
+
+test.ts <- ts(testing$Price,
+              start = c(as.numeric(format(testing$Date[1], "%Y")),
+                        as.numeric(format(testing$Date[1], "%m"))),
+              frequency = 12)
+
+```
+
+### SES
+
+```{r}
+#Cara 1 (fungsi single exponential smoothing dengan alpha 0.2 dan 0.7)
+ses.1 <- ses(train.ts, h = 20, alpha = 0.2)
+plot(ses.1)
+ses.1
+
+ses.2<- ses(train.ts, h = 20, alpha = 0.7)
+plot(ses.2)
+ses.2
+```
+
+```{r}
+# visualisasi hasil SES
+autoplot(ses.1) +
+  autolayer(fitted(ses.1), series="Fitted") +
+  ylab("Membaca") + xlab("Periode")
+```
+
+SES menghasilkan ramalan yang terlalu sederhana (datar), sehingga kurang realistis untuk data dengan volatilitas tinggi. Namun, SES tetap bermanfaat sebagai model pembanding dasar, sebelum menggunakan metode yang lebih kompleks (misalnya Holt-Winters atau ARIMA).
+
+```{r}
+#Cara 2 (fungsi Holtwinter)
+ses1<- HoltWinters(train.ts, gamma = FALSE, beta = FALSE, alpha = 0.2)
+plot(ses1)
+
+#ramalan
+ramalan1<- forecast(ses1, h=20)
+ramalan1
+
+ses2<- HoltWinters(train.ts, gamma = FALSE, beta = FALSE, alpha = 0.7)
+plot(ses2)
+
+#ramalan
+ramalan2<- forecast(ses2, h=20)
+ramalan2
+```
+
+```{r}
+#SES
+ses.opt <- ses(train.ts, h = 20, alpha = NULL)
+plot(ses.opt)
+ses.opt
+
+#Lamda Optimum Holt Winter
+sesopt<- HoltWinters(train.ts, gamma = FALSE, beta = FALSE,alpha = NULL)
+sesopt
+plot(sesopt)
+
+#ramalan
+ramalanopt<- forecast(sesopt, h=20)
+ramalanopt
+```
+
+Dengan alpha = 0.2, pemulusan lebih kuat sehingga fitted line lebih halus dan menolak fluktuasi sementara, namun tertinggal saat ada lonjakan tajam. Dengan alpha = 0.7, model lebih responsif dan fitted line menempel pada data aktual, tetapi juga lebih peka terhadap noise.
+
+### DES
+
+Metode pemulusan *Double Exponential Smoothing* (DES) digunakan untuk data yang memiliki pola tren. Pemulusan menggunakan metode ini akan menghasilkan peramalan tidak konstan untuk periode berikutnya.
+
+```{r}
+#Lamda=0.2 dan gamma=0.2
+des.1<- HoltWinters(train.ts, gamma = FALSE, beta = 0.2, alpha = 0.2)
+plot(des.1)
+
+#ramalan
+ramalandes1<- forecast(des.1, h=20)
+ramalandes1
+
+#Lamda=0.6 dan gamma=0.3
+des.2<- HoltWinters(train.ts, gamma = FALSE, beta = 0.3, alpha = 0.6)
+plot(des.2)
+
+#ramalan
+ramalandes2<- forecast(des.2, h=20)
+ramalandes2
+```
+
+Grafik 1 (α=0.2, β=0.2): Lebih halus, lebih stabil, tapi kurang responsif.
+
+Grafik 2 (α=0.6, β=0.3): Lebih responsif, fitted lebih dekat ke data aktual, tapi juga lebih sensitif terhadap noise.
+
+Selanjutnya jika ingin membandingkan plot data latih dan data uji adalah sebagai berikut.
+
+```{r}
+#Visually evaluate the prediction
+plot(data.ts)
+lines(des.1$fitted[,1], lty=2, col="blue")
+lines(ramalandes1$mean, col="red")
+```
+
+Untuk mendapatkan nilai parameter optimum dari DES, argumen `alpha` dan `beta` dapat dibuat `NULL` seperti berikut.
+
+```{r}
+#Lamda dan gamma optimum
+des.opt<- HoltWinters(train.ts, gamma = FALSE)
+des.opt
+plot(des.opt)
+
+#ramalan
+ramalandesopt<- forecast(des.opt, h=20)
+ramalandesopt
+```
+
+Selanjutnya akan dilakukan perhitungan akurasi pada data latih maupun data uji dengan ukuran akurasi SSE, MSE dan MAPE.
+
+#### Akurasi Data Latih
+
+```{r}
+#Akurasi Data Training
+ssedes.train1<-des.1$SSE
+msedes.train1<-ssedes.train1/length(train.ts)
+sisaandes1<-ramalandes1$residuals
+head(sisaandes1)
+
+mapedes.train1 <- sum(abs(sisaandes1[3:length(train.ts)]/train.ts[3:length(train.ts)])
+                      *100)/length(train.ts)
+
+akurasides.1 <- matrix(c(ssedes.train1,msedes.train1,mapedes.train1))
+row.names(akurasides.1)<- c("SSE", "MSE", "MAPE")
+colnames(akurasides.1) <- c("Akurasi lamda=0.2 dan gamma=0.2")
+akurasides.1
+
+ssedes.train2<-des.2$SSE
+msedes.train2<-ssedes.train2/length(train.ts)
+sisaandes2<-ramalandes2$residuals
+head(sisaandes2)
+
+mapedes.train2 <- sum(abs(sisaandes2[3:length(train.ts)]/train.ts[3:length(train.ts)])
+                      *100)/length(train.ts)
+
+akurasides.2 <- matrix(c(ssedes.train2,msedes.train2,mapedes.train2))
+row.names(akurasides.2)<- c("SSE", "MSE", "MAPE")
+colnames(akurasides.2) <- c("Akurasi lamda=0.6 dan gamma=0.3")
+akurasides.2
+```
+
+Hasil akurasi dari data latih didapatkan skenario 2 dengan lamda=0.6 dan gamma=0.3 memiliki hasil yang lebih baik. Namun untuk kedua skenario dapat dikategorikan peramalan sangat baik berdasarkan nilai MAPE-nya.
+
+#### Akurasi Data Uji
+
+```{r}
+#Akurasi Data Testing
+selisihdes1<-ramalandes1$mean-testing$Price
+selisihdes1
+
+SSEtestingdes1<-sum(selisihdes1^2)
+MSEtestingdes1<-SSEtestingdes1/length(testing$Price)
+MAPEtestingdes1<-sum(abs(selisihdes1/testing$Price)*100)/length(testing$Price)
+
+selisihdes2<-ramalandes2$mean-testing$Price
+selisihdes2
+
+SSEtestingdes2<-sum(selisihdes2^2)
+MSEtestingdes2<-SSEtestingdes2/length(testing$Price)
+MAPEtestingdes2<-sum(abs(selisihdes2/testing$Price)*100)/length(testing$Price)
+
+selisihdesopt<-ramalandesopt$mean-testing$Price
+selisihdesopt
+
+SSEtestingdesopt<-sum(selisihdesopt^2)
+MSEtestingdesopt<-SSEtestingdesopt/length(testing$Price)
+MAPEtestingdesopt<-sum(abs(selisihdesopt/testing$Price)*100)/length(testing$Price)
+
+akurasitestingdes <-
+  matrix(c(SSEtestingdes1,MSEtestingdes1,MAPEtestingdes1,SSEtestingdes2,MSEtestingdes2,
+           MAPEtestingdes2,SSEtestingdesopt,MSEtestingdesopt,MAPEtestingdesopt),
+         nrow=3,ncol=3)
+row.names(akurasitestingdes)<- c("SSE", "MSE", "MAPE")
+colnames(akurasitestingdes) <- c("des ske1","des ske2","des opt")
+akurasitestingdes
+```
+
+Model dengan parameter λ = 0.6 dan γ = 0.3 (ske2) memberikan hasil terbaik pada data latih (MAPE = 1.71), namun buruk pada data uji (MAPE = 8.14).
+
+Model dengan parameter λ = 0.2 dan γ = 0.2 (ske1) memiliki hasil sedang pada data latih (MAPE = 2.94) dan lebih baik dari ske2 di data uji (MAPE = 6.66).
+
+Model hasil optimasi (DES opt) memberikan hasil terbaik di data uji (MAPE = 3.49) dan memiliki nilai SSE dan MSE terendah. Ini adalah model yang paling akurat, cocok untuk prediksi.
+
+### Kesimpulan Akhir
+
+Dalam analisis ini, dilakukan peramalan data harga kopi Arabika menggunakan tiga metode pemulusan: Double Moving Average (DMA), Single Exponential Smoothing (SES), dan Double Exponential Smoothing (DES). Setiap metode dievaluasi berdasarkan akurasi prediksinya pada data latih dan data uji, menggunakan metrik SSE, MSE, dan MAPE.
+
+Hasil Evaluasi:
+
+1.  Metode DMA mampu mengikuti pola tren dengan baik pada data latih (MAPE = 2.18%) dan menghasilkan akurasi cukup baik di data uji (MAPE = 7.73%). Namun, metode ini kurang mampu menangkap pola musiman atau perubahan tren yang tajam.
+
+2.  Metode SES menghasilkan prediksi yang terlalu sederhana dan tidak mampu menangkap tren data yang jelas. Akurasi pada data uji juga lebih rendah dibandingkan metode lainnya, sehingga kurang direkomendasikan untuk data ini.
+
+3.  Metode DES (Double Exponential Smoothing) terbukti sebagai metode yang paling akurat dan stabil-Model hasil optimasi (DES Opt) memberikan MAPE terendah pada data uji (3.49%), serta SSE dan MSE terkecil. DES juga mampu menangkap pola tren dalam data dengan lebih baik dibandingkan DMA dan SES. Meskipun skenario tertentu (misalnya λ=0.6 dan γ=0.3) overfitting, hasil model optimasi menunjukkan performa terbaik secara keseluruhan.
