@@ -1,0 +1,209 @@
+---
+title: "Tugas Kuliah 2"
+author: "Atika Fawwaz G1401231038"
+date: "2025-09-02"
+output: html_document
+---
+
+## Tahap 1: Persiapan Alat dan Data
+
+```{r}
+# Setelah instalasi berhasil, panggil semua library
+library(lmtest) # Untuk Uji Durbin-Watson
+library(orcutt) # Untuk metode Cochrane-Orcutt
+library(HoRM)   # Untuk metode Hildreth-Lu
+library("forecast")
+library("graphics")
+library("TTR")
+library("TSA")
+```
+
+```{r}
+# Mengimpor data 
+library(rio)
+data <- import("https://raw.githubusercontent.com/atikafawwaz/mpdw/refs/heads/main/pertemuan2/mpdw5%20-%20Sheet1.csv")
+```
+
+```{r}
+## Eksplorasi Data
+View(data)
+str(data)
+dim(data)
+```
+
+```{r}
+# Mengubah data agar terbaca sebagai data deret waktu
+data.ts <- ts(data$IPM)
+# Menampilkan ringkasan data
+summary(data.ts)
+# Membuat plot data deret waktu
+ts.plot(data.ts, main="Time Series IPM Bengkulu", ylab="IPM", xlab="Tahun")
+points(data.ts, col="pink", pch=19)
+```
+
+```{r}
+# Plot Data
+plot(data$Tahun, data$IPM, type="b", col="pink", pch=19, xlab="Tahun", ylab="IPM", main="Plot IPM Bengkulu")
+```
+
+## Tahap 2: Membuat Model Awal
+
+```{r}
+# Membuat model regresi OLS (Ordinary Least Squares)
+model_awal <- lm(IPM ~ Tahun, data = data)
+summary(model_awal)
+```
+
+**Observasi Awal:** Nilai Adjusted R-squared sangat **tinggi** (0.9867) dan koefisien `tahun` **sangat signifikan (p-value \< 0.001)**.
+
+## Tahap 3: Diagnosis (Investigasi Sisaan)
+
+### 3.1. Diagnosis Visual
+
+```{r}
+# Ambil sisaan dari model
+sisaan_awal <- residuals(model_awal)
+
+# Plot sisaan terhadap waktu
+plot(data$Tahun, sisaan_awal, type="o", pch=20, col="red",
+     main="Plot Sisaan vs Waktu", xlab="Tahun", ylab="Sisaan")
+abline(h=0, lty=2) # Garis referensi di y=0
+```
+
+Ada pengelompokan sisaan (clustering), bukan penyebaran acak. Sisaan positif diikuti positif, dan negatif diikuti negatif → indikasi autokorelasi positif. Ini artinya ada pola sistematis yang belum ditangkap oleh model → sisaan tidak bersifat white noise.
+
+### 3.2. Diagnosis Formal (Uji Durbin-Watson)
+
+-   **H0 (Hipotesis Nol)**: Tidak ada autokorelasi. Sisaan saling bebas.
+
+-   **H1 (Hipotesis Alternatif)**: Ada autokorelasi.
+
+```{r}
+dwtest(model_awal)
+```
+
+**Hasil Investigasi:**
+
+-   P-value yang dihasilkan **sangat kecil (0.00000839)**, yaitu di bawah tingkat signifikansi 0.05.
+
+-   Kesimpulan: Kita **menolak H0**. Bukti sudah kuat. Model kita **terbukti menderita autokorelasi**.
+
+## Tahap 4: Penanganan (Menyembuhkan Model)
+
+### Metode 1: Cochrane-Orcutt
+
+**Intuisi:** Metode ini secara iteratif (berulang-ulang) mencoba menemukan "tingkat penularan" error (disebut rho, ρ), lalu menyesuaikan model sampai autokorelasinya hilang.
+
+```{r}
+model_co <- cochrane.orcutt(model_awal)
+summary(model_co)
+
+# rho paling optimum
+rho <- model_co$rho
+cat("Rho optimum:", rho)
+```
+
+**Hasil Penanganan (C-O):**
+
+-   Lihat nilai **rho** yang diestimasi. Ini adalah "dosis" yang digunakan untuk memperbaiki model.
+
+-   Lihat statistik **Durbin-Watson baru**. Nilainya sekarang jauh lebih dekat ke 2, dan p-value-nya (\> 0.05) menunjukkan bahwa **autokorelasi sudah berhasil diatasi**.
+
+-   Perhatikan koefisien `(Intercept)` dan `tahun` yang baru. Ini adalah estimasi yang lebih valid.
+
+**Verifikasi Manual:**
+
+```{r}
+ipm.trans <- data$IPM[-1] - data$IPM[-14]*rho
+
+tahun.trans <- data$Tahun[-1] - data$Tahun[-14]*rho
+model_co_manual <- lm(ipm.trans~tahun.trans)
+
+b0_co_manual <- coef(model_co_manual)[1]/(1-rho)
+b1_co_manual <- coef(model_co_manual)[2]
+cat("Koefisien manual Cochrane-Orcutt:\n")
+cat("b0:", b0_co_manual, "\n")
+cat("b1:", b1_co_manual, "\n")
+```
+
+### Metode 2: Hildreth-Lu
+
+**Intuisi:** Metode ini lebih sistematis. Ia akan mencoba berbagai kemungkinan nilai ρ dan memilih satu yang menghasilkan **Sum of Squared Errors (SSE) terkecil.**
+
+```{r}
+#Penanganan Autokorelasi Hildreth lu
+# Hildreth-Lu
+hildreth.lu.func<- function(r, model){
+  x <- model.matrix(model)[,-1]
+  y <- model.response(model.frame(model))
+  n <- length(y)
+  t <- 2:n
+  y <- y[t]-r*y[t-1]
+  x <- x[t]-r*x[t-1]
+  
+  return(lm(y~x))
+}
+
+#Pencariab rho yang meminimumkan SSE 9ini mulai dari 0
+r <- c(seq(0.1,0.9, by= 0.1))
+tab <- data.frame("rho" = r, "SSE" = sapply(r, function(i){deviance(hildreth.lu.func(i, model_awal))}))
+round(tab, 4)
+```
+
+Pertama-tama akan dicari di mana kira-kira ρ yang menghasilkan SSE minimum. Pada hasil di atas terlihat ρminimum ketika 0.7. Namun, hasil tersebut masih kurang teliti sehingga akan dicari kembali ρ yang lebih optimum dengan ketelitian yang lebih. Jika sebelumnya jarak antar ρ yang dicari adalah 0.1, kali ini jarak antar ρ adalah 0.001 dan dilakukan pada selang 0.6 sampai dengan 0.8.
+
+```{r}
+#Rho optimal di sekitar 0.7
+rOpt <- seq(0.6,0.8, by= 0.001)
+tabOpt <- data.frame("rho" = rOpt, "SSE" = sapply(rOpt, function(i){deviance(hildreth.lu.func(i, model_awal))}))
+head(tabOpt[order(tabOpt$SSE),])
+```
+
+```{r}
+#Grafik SSE optimum
+par(mfrow = c(1,1))
+plot(tab$SSE ~ tab$rho , type = "l", xlab = "Rho", ylab = "SSE")
+abline(v = tabOpt[tabOpt$SSE==min(tabOpt$SSE),"rho"], lty = 2, col="red",lwd=2)
+text(x=0.719, y=0.2667970, labels = "rho=0.719", cex = 0.8)
+```
+
+```{r}
+# pake rho yg maks plg optimum tdi
+model_hl <- hildreth.lu(data$IPM, data$Tahun, rho = 0.719)
+summary(model_hl)
+```
+
+```{r}
+#Transformasi Balik
+cat("y = ", coef(model_hl)[1]/(1-0.719), "+", coef(model_hl)[2],"x", sep = "")
+```
+
+```{r}
+#Deteksi autokorelasi, yey udah diatas 0.05 woiii
+dwtest(model_hl)
+```
+
+**Hasil Penanganan (H-L):**
+
+-   Plot yang dihasilkan secara visual menunjukkan nilai ρ mana yang menjadi "juara" (memiliki SSE terendah).
+
+-   Hasil summary memberikan model akhir yang juga sudah "sehat", dengan statistik D-W yang sudah membaik.
+
+## Tahap 5: Evaluasi Akhir
+
+```{r}
+# Menghitung SSE untuk setiap model secara manual
+sse_awal <- sum(residuals(model_awal)^2)
+sse_co <- sum(residuals(model_co)^2)
+sse_hl <- sum(residuals(model_hl)^2)
+
+# Membuat tabel perbandingan
+data.frame(
+  Metode = c("Model Awal (Sakit)", "Cochrane-Orcutt (Sehat)", "Hildreth-Lu (Sehat)"),
+  SSE = c(sse_awal, sse_co, sse_hl),
+  DW_Statistic = c(dwtest(model_awal)$statistic, model_co$DW[3], dwtest(model_hl)$statistic)
+)
+
+```
+
+**Kesimpulan Investigasi:** **Analisis regresi awal** antara IPM dan Tahun menunjukkan nilai Adjusted R² yang **sangat tinggi (0.9867)** serta koefisien signifikan, sehingga sekilas terlihat sebagai model yang baik. Namun, hasil **uji Durbin-Watson** dengan **p-value 8.39e-06** serta pola sisaan yang berkelompok membuktikan adanya **autokorelasi positif** pada model tersebut, sehingga model tidak valid. Untuk mengatasi hal ini, dilakukan dua metode penanganan, yaitu **Cochrane-Orcutt dan Hildreth-Lu**. Keduanya berhasil mengurangi autokorelasi, ditunjukkan oleh statistik Durbin-Watson yang mendekati 2 dan p-value yang meningkat di atas 0.05. Setelah dibandingkan, **Hildreth-Lu** memberikan hasil paling optimal karena menghasilkan **SSE terendah** dan model akhir yang **bebas autokorelasi**. Dengan demikian, **model Hildreth-Lu dipilih sebagai model terbaik** dalam menjelaskan hubungan IPM dengan Tahun di Provinsi Bengkulu.
