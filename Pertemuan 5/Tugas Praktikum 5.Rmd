@@ -1,5 +1,6 @@
 ---
 title: "Tugas Praktikum 5"
+author: "Atika Fawwaz"
 output:
   html_document: default
   pdf_document: default
