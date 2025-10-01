@@ -1,1 +1,127 @@
+---
+title: "Tugas Praktikum 5"
+output:
+  html_document: default
+  pdf_document: default
+date: "2023-10-01"
+---
 
+# Library
+
+```{r}
+library(ggplot2)
+library(tsibble)
+library(tseries)
+library(MASS)
+library(rio)
+```
+
+# Data Coffe Arabica
+
+```{r}
+library(rio)
+data <- import("https://raw.githubusercontent.com/atikafawwaz/mpdw/main/Pertemuan%201/coffeprices.xlsx", format = "xlsx")
+```
+
+```{r}
+View(data)
+str(data)
+dim(data)
+```
+
+```{r}
+# konversi kolom Price menjadi objek time series
+data.ts <- ts(data$Price, start = c(1960, 1), frequency = 12)
+```
+
+```{r}
+summary(data.ts)
+```
+
+## Pengujian stasioneritas data dalam Rataan dan Ragam
+Pengujian stasioneritas data dilakukan dengan beberapa cara, yaitu:
+1. Plot Time Series
+2. Plot ACF
+3. Uji ADF
+4. Plot Box-Cox
+
+### Plot *Time Series*
+
+```{r}
+plot_data.ts <- data.ts |> as_tsibble() |> 
+  ggplot(aes(x = index, y = value)) + geom_line() + theme_bw() +
+  xlab("Time Period") + ylab("Price") + ggtitle("Plot Time Series Data Coffe Arabica")
+plot_data.ts
+ts.plot(data.ts, xlab="Time Period", ylab="Price", 
+        main = "Time Series Plot of Coffe Arabica")
+points(data.ts)
+mean(data.ts)
+```
+
+```{r}
+lattice::densityplot(as.vector(data.ts))
+```
+
+Plot deret waktu di atas menunjukkan bahwa **asumsi stasioneritas dalam rataan belum terpenuhi,** karena terdapat tren menurun (1960–1963), lonjakan tajam (1964), dan penurunan kembali (1966), sehingga rataan tidak konstan. **Asumsi stasioneritas dalam ragam juga belum terpenuhi,** ditandai dengan fluktuasi yang tidak stabil sepanjang periode.
+
+### Plot ACF
+
+```{r}
+acf(data.ts)
+```
+
+Berdasarkan plot ACF, terlihat bahwa pola ACF pada data tersebut cenderung tails off secara perlahan dan membentuk gelombang sinus. Hal ini menunjukkan bahwa asumsi stasioneritas dalam rataan **belum terpenuhi** karena ACF tidak cepat turun menuju nol.
+
+### Uji ADF
+
+```{r}
+tseries::adf.test(data.ts)
+```
+
+$H_0$ : Data tidak data.tsioner dalam rataan
+
+$H_1$ : Data data.tsioner dalam rataan
+
+Berdasarkan uji ADF tersebut, didapat *p-value* sebesar 0.6787 yang lebih besar dari taraf nyata 5% sehingga **terima** $H_0$ dan menandakan bahwa data **data tidak stasioner dalam rataan.** Hal ini sesuai dengan hasil eksplorasi menggunakan plot time series dan plot ACF.
+
+### Plot Box-Cox
+
+```{r}
+index <- seq(1:100)
+bc = boxcox(data.ts~index, lambda = seq(-1,4,by=0.01)) #seq dan 
+#Nilai Rounded Lambda
+lambda <- bc$x[which.max(bc$y)]
+lambda
+#SK
+bc$x[bc$y > max(bc$y) - 1/2 * qchisq(.95,1)]
+```
+
+Selang tersebut memuat nilai satu sehingga dapat dikatakan bahwa data bangkitan **data stasioner dalam ragam.**
+
+# Penanganan Data Tidak Stasioner dalam Rataan
+Penanganan data tidak stasioner dalam rataan dapat dilakukan dengan metode differencing. Berikut adalah langkah-langkahnya:
+1. Lakukan differencing orde 1 pada data.
+2. Uji stasioneritas pada data hasil differencing dengan plot time series, plot ACF, dan uji ADF.
+
+```{r}
+data.diff <- diff(data.ts, differences = 1) 
+plot.ts(data.diff, lty = 1, 
+        xlab = "Periode", ylab = "Data Difference 1", 
+        main = "Plot Difference Coffe Arabica")
+```
+Pada plot di atas, terlihat bahwa data hasil differencing sudah tidak menunjukkan tren yang jelas sehingga **data sudah stasioner dalam rataan.**
+```{r}
+acf(data.diff)
+
+```
+
+Berdasarkan plot ACF, pola plot menunjukkan cut off di lag 1 sehingga mengindikasikan bahwa **data sudah stasioner dalam rataan.**
+
+```{r}
+tseries::adf.test(data.diff)
+
+```
+
+Berdasarkan uji ADF tersebut, jika diperoleh p-value lebih kecil dari taraf nyata 5%, maka $H_0$ **ditolak** sehingga dapat disimpulkan bahwa **data sudah stasioner dalam rataan.**
+
+**Kesimpulan:** Data Coffe Arabica tidak stasioner dalam rataan, namun sudah stasioner dalam ragam. Setelah dilakukan differencing orde 1, data menjadi stasioner dalam rataan.
